@@ -106,6 +106,9 @@ PPDE Pdir;
 uint32 Test_pte;
 uint32 Test_addr;
 
+uint32 old_offset = 0;
+uint16 old_segment = 0;
+
 void idt_set_gate(PIDTENTRY idt, uint8 num, uint32 offset, uint16 seg_sel, uint8 flags) {
     idt[num].offset_l = offset & 0xFFFF;
     idt[num].offset_h = (offset >> 16) & 0xFFFF;
@@ -213,10 +216,11 @@ PPDE create_pd()
 void set_pf_handler(PSYSINFO sysinfo)
 {
     PIDTENTRY idt_table = (PIDTENTRY)sysinfo->idt.base;
-    uint32 old_offset = idt_table[PF_EXCEPTION].offset_h << 16 | idt_table[PF_EXCEPTION].offset_l;
-    uint16 old_segment = idt_table[PF_EXCEPTION].seg_sel;
     uint32 new_offset = 0;
     uint16 new_segment = 0;
+    
+    old_offset = idt_table[PF_EXCEPTION].offset_h << 16 | idt_table[PF_EXCEPTION].offset_l;
+    old_segment = idt_table[PF_EXCEPTION].seg_sel;
     
     __asm {
         mov edx, offset pf_handler
