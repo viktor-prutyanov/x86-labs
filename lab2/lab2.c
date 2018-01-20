@@ -103,8 +103,6 @@ void get_sysinfo(PSYSINFO psysinfo)
 }
 
 PPDE Pdir;
-uint32 Test_pte;
-uint32 Test_addr;
 
 void idt_set_gate(PIDTENTRY idt, uint8 num, uint32 offset, uint16 seg_sel, uint8 flags) {
     idt[num].offset_l = offset & 0xFFFF;
@@ -114,38 +112,71 @@ void idt_set_gate(PIDTENTRY idt, uint8 num, uint32 offset, uint16 seg_sel, uint8
     idt[num].flags = flags;
 }
 
-uint32 Test_res = 0;
-
-void __declspec(naked) pf_handler(void) 
+void __declspec(naked) gp_handler(void) 
 {
-    __asm {
-        push eax
-        push edx
+	__asm {
+		push edx 
 
-        mov edx, cr2
-        cmp edx, Test_addr      // check if fault addr is test addr
-        jne pf
+		mov dl, 'I'
+		mov ah, 2
+		int 0x21
+		mov dl, ' '
+		mov ah, 2
+		int 0x21
+		mov dl, 'a'
+		mov ah, 2
+		int 0x21
+		mov dl, 'm'
+		mov ah, 2
+		int 0x21
+		mov dl, ' '
+		mov ah, 2
+		int 0x21
+		mov dl, 'G'
+		mov ah, 2
+		int 0x21
+		mov dl, 'P'
+		mov ah, 2
+		int 0x21
+		mov dl, ' '
+		mov ah, 2
+		int 0x21
+		mov dl, 'h'
+		mov ah, 2
+		int 0x21
+		mov dl, 'a'
+		mov ah, 2
+		int 0x21
+		mov dl, 'n'
+		mov ah, 2
+		int 0x21
+		mov dl, 'd'
+		mov ah, 2
+		int 0x21
+		mov dl, 'l'
+		mov ah, 2
+		int 0x21
+		mov dl, 'e'
+		mov ah, 2
+		int 0x21
+		mov dl, 'r'
+		mov ah, 2
+		int 0x21
+		mov dl, '!'
+		mov ah, 2
+		int 0x21
+		mov dl, 0x0d
+		mov ah, 2
+		int 0x21
+		mov dl, 0x0a
+		mov ah, 2
+		int 0x21
 
-        mov eax, Test_pte       // PTE corresponding to test address
-        or dword ptr[eax], 1h   // restore P bit
-        invlpg [eax]            // invalidate all paging caches for test address
-        
-        lea eax, Test_res
-        mov [eax], 1
-        
-        jmp done
-    pf:
-        pop edx
-        pop eax
-        push old_segment
-        push old_offset
-        retf 
-    done:
-        pop edx
-        pop eax
-        add esp, 4
-        iretd
-    }
+		pop edx
+		mov eax, 0x80000011
+		add esp, 4
+		iretd
+	}
 }
 
 /*
@@ -164,16 +195,14 @@ PPTE create_pts()
     
     printf("Allocated 4100KB: 0x%08X - 0x%08X, 4MB aligned: 0x%08X - 0x%08X\n", 
             _p, _p + pts_size + pt_size, _p_aligned, _p_aligned + pts_size);
-   
-   	printf("PTEs: ");
+    
     for (pte_i = 0; pte_i < 1024 * 1024; pte_i++) {
         pt[pte_i].raw = pte_i * 0x1000;
         pt[pte_i].raw |= PTE_WU_4KB;
         if ((pte_i == 0) || (pte_i == 1) || (pte_i == 1024 * 1024 - 1))
-            printf("%08Xh at %p%s", pt[pte_i].raw, pt + pte_i, 
-				(pte_i != 1024 * 1024 - 1) ? ", " : "\n");
+            printf("PTE = 0x%08X at %p\n", pt[pte_i].raw, pt + pte_i);
         if (pte_i == 2)
-            printf("... ");
+            printf("...\n");
     }
 
     return pt;
@@ -196,68 +225,34 @@ PPDE create_pd()
     printf("Allocated 8KB: 0x%08X - 0x%08X, 4KB aligned: 0x%08X - 0x%08X\n", 
             _p, _p + 2 * pd_size, _p_aligned, _p_aligned + pd_size);
 
-	printf("PDEs: ");
     for (pde_i = 0; pde_i < 1024; pde_i++) {
         pd[pde_i].raw = (uint32)pts + pde_i * 0x1000;
         pd[pde_i].raw |= PDE_WU_PT;
         if ((pde_i == 0) || (pde_i == 1) || (pde_i == 1023))
-            printf("%08Xh at %p%s", pd[pde_i].raw, pd + pde_i, 
-				(pde_i != 1023) ? ", " : "\n");
+            printf("PDE = 0x%08X at %p\n", pd[pde_i].raw, pd + pde_i);
         if (pde_i == 2)
-            printf("... ");
+            printf("...\n");
     }
 
     return pd;
 }
 
-void set_pf_handler(PSYSINFO sysinfo)
+#define GP_EXEPTION 13
+
+void set_gp_handler(PSYSINFO sysinfo)
 {
     PIDTENTRY idt_table = (PIDTENTRY)sysinfo->idt.base;
-    uint32 old_offset = idt_table[PF_EXCEPTION].offset_h << 16 | idt_table[PF_EXCEPTION].offset_l;
-    uint16 old_segment = idt_table[PF_EXCEPTION].seg_sel;
     uint32 new_offset = 0;
     uint16 new_segment = 0;
     
     __asm {
-        mov edx, offset pf_handler
+        mov edx, offset gp_handler
         mov new_offset, edx
-        mov ax, seg pf_handler
+        mov ax, seg gp_handler
         mov new_segment, ax
     }
 
-    idt_set_gate(idt_table, PF_EXCEPTION, new_offset, new_segment, idt_table[PF_EXCEPTION].flags);
-}
-
-void paging_test(int death_test)
-{
-    uint32 p_size = 4096;
-    void *p = malloc(2 * p_size);
-    uint32 _p = (uint32)p;
-    PPTE test_pte;
-    SYSINFO sysinfo;
-    
-    _p = (_p & ~(p_size - 1)) + p_size;
-    test_pte = ((PPTE)(Pdir[(_p & 0xFFC00000) >> 22].pta << 12)) + ((_p & 0x003FF000) >> 12);
-
-    printf("Test page at 0x%08X, corresponding PTE at %p\n", _p, test_pte);
-
-    (*test_pte).p = 0;
-
-    get_sysinfo(&sysinfo);
-    set_pf_handler(&sysinfo);
-
-    Test_pte = (uint32)test_pte;
-    Test_addr = (uint32)_p;
-
-    *((char *)_p) = 0x55; // Our PF handler will be called
-    printf("Test result: %s\n", Test_res ? "PASSED!" : "FAILED");
-   	
-	if (death_test) {
-    	(*test_pte).p = 0;
-    	
-    	printf("Default handler:\n");
-    	printf("I am memory %d\n", *((uint32 *)(_p + 4)));
-	}
+    idt_set_gate(idt_table, GP_EXEPTION, new_offset, new_segment, idt_table[GP_EXEPTION].flags);
 }
 
 void paging_on()
@@ -297,5 +292,15 @@ void main(int argc, char *argv)
     get_sysinfo(&si);
     printf("CR0 = 0x%08X : PG = %d\n", si.cr0, si.cr0 & CR0_PG ? 1 : 0);
 
-	paging_test(1);
+	printf("\nTest GP handler:\n");
+    get_sysinfo(&si);
+	set_gp_handler(&si);
+
+	__asm {
+		mov eax, cr0
+		and eax, 0xFFFFFFFE //0xFFFFFFE
+		mov cr0, eax
+	}
+	
+	printf("GP handler returned.\n");
 }
